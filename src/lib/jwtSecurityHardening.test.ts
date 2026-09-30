@@ -150,8 +150,8 @@ describe("JWT Signature Verification & Zero-Trust Authentication Security", () =
     const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64");
     const payload = Buffer.from(
       JSON.stringify({
-        iss: "https://securetoken.google.com/ai-studio-ifprachadosperdi-d3034e26-954c-413d-8c6d-f7e508afe8b1",
-        aud: "ai-studio-ifprachadosperdi-d3034e26-954c-413d-8c6d-f7e508afe8b1",
+        iss: "https://securetoken.google.com/gen-lang-client-0490390966",
+        aud: "gen-lang-client-0490390966",
         sub: "attacker-fake-uid",
         user_id: "attacker-fake-uid",
         email: "admin@exemplo.com",

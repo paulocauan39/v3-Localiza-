@@ -11,8 +11,8 @@ function createAuthToken(email: string, role: string = "ALUNO", verified: boolea
   const now = Math.floor(Date.now() / 1000);
   const payload = Buffer.from(
     JSON.stringify({
-      iss: "https://securetoken.google.com/ai-studio-ifprachadosperdi-d3034e26-954c-413d-8c6d-f7e508afe8b1",
-      aud: "ai-studio-ifprachadosperdi-d3034e26-954c-413d-8c6d-f7e508afe8b1",
+      iss: "https://securetoken.google.com/gen-lang-client-0490390966",
+      aud: "gen-lang-client-0490390966",
       sub: "test-user-validation-500",
       user_id: "test-user-validation-500",
       email,

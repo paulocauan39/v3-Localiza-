@@ -42,9 +42,7 @@ export function getFirebaseAuth(): Auth {
 
 export function getFirebaseDb(): Firestore {
   if (!dbInstance) {
-    const dbId =
-      (firebaseConfig as any).firestoreDatabaseId ||
-      "ai-studio-ifprachadosperdi-d3034e26-954c-413d-8c6d-f7e508afe8b1";
+    const dbId = (firebaseConfig as any).firestoreDatabaseId || "ai-studio-remixifprachados-018515d5-45e1-4bef-91e8-bdd980f85e66";
     const app = getFirebaseApp();
 
     try {

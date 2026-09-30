@@ -1,5 +1,6 @@
 import { doc, setDoc, deleteDoc, getDoc } from "firebase/firestore";
 import { db, auth } from "./firebase";
+import firebaseConfig from "../../firebase-applet-config.json";
 import { LostFoundItem, UserRole } from "../types";
 import { formatSafeDate } from "./utils";
 
@@ -34,10 +35,14 @@ export async function runFirestoreAddItemDiagnostic(
   customRoleOverride?: UserRole | "ACADEMIC"
 ): Promise<AddItemDiagnosticResult> {
   const timestamp = new Date().toISOString();
+  const effectiveDbId = (firebaseConfig as any).firestoreDatabaseId || "ai-studio-remixifprachados-018515d5-45e1-4bef-91e8-bdd980f85e66";
+  const effectiveProjectId = (firebaseConfig as any).projectId || "gen-lang-client-0490390966";
+
   console.group("🔍 [LOCALIZA+ DIAGNÓSTICO FIRESTORE] - Teste de Gravação 'addItem'");
   console.log("Iniciando auditoria de permissões e integridade de escrita no Firestore...", {
     timestamp,
-    database: "ai-studio-ifprachadosperdi-d3034e26-954c-413d-8c6d-f7e508afe8b1",
+    database: effectiveDbId,
+    projectId: effectiveProjectId,
   });
 
   const currentUser = auth.currentUser;

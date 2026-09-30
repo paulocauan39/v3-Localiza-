@@ -24,12 +24,57 @@ export interface AppVersion {
 
 export const APP_VERSIONS_DATA: AppVersion[] = [
   {
+    version: "v1.9.40",
+    codename: "Firebase Configuration Normalization & CEL Rules Deployment",
+    releaseDate: "30/09/2026",
+    releaseDateTime: "30 de Setembro de 2026 • 20:25 BRT",
+    type: "PATCH",
+    isCurrent: true,
+    summary: "Correção e normalização integral do ambiente Firebase/Firestore e regras de segurança: 1) Correção de chamadas inválidas a métodos CEL inexistentes (.lower()) em firestore.rules que causavam falhas de avaliação em tempo de execução no motor de segurança do Firestore para validação de isRootAdmin e e-mails; 2) Deploy formal das regras consolidadas do Firestore para o banco de dados remoto 'ai-studio-remixifprachados-018515d5-45e1-4bef-91e8-bdd980f85e66' no projeto 'gen-lang-client-0490390966'; 3) Normalização estrita da configuração e singleton entre frontend (firebaseInit.ts, firebase.ts), backend (server.ts, firebaseAdmin.ts) e rotas serverless (/api/system/config, /api/analytics/track); 4) Eliminação definitiva de falhas 'permission-denied' na leitura e escrita de items, claims, notifications, comments, sincronização de usuários e verificação de e-mail único.",
+    additions: [
+      {
+        id: "v1940-add-1",
+        title: "Normalização e Validação do Singleton Firebase Admin",
+        description: "Alinhamento das credenciais e identificadores de banco no Admin SDK e rotas Express/Serverless para a base 'ai-studio-remixifprachados-018515d5-45e1-4bef-91e8-bdd980f85e66'.",
+        module: "FIRESTORE",
+        tag: "Configuração & Backend",
+      },
+      {
+        id: "v1940-add-2",
+        title: "Deploy Remoto de Firestore Rules Atualizadas",
+        description: "Execução do deploy formal das regras de segurança com o princípio de menor privilégio e compatibilidade com o Google Cloud Firestore.",
+        module: "FIRESTORE",
+        tag: "Segurança & Deploy",
+      },
+    ],
+    bugFixes: [
+      {
+        id: "v1940-fix-1",
+        title: "Remoção de Métodos CEL Inexistentes (.lower()) em firestore.rules",
+        description: "Substituição do método inexistente .lower() por correspondência regex compatível CEL em isRootAdmin e regras de criação da coleção users.",
+        module: "FIRESTORE",
+        tag: "Correção Crítica",
+      },
+      {
+        id: "v1940-fix-2",
+        title: "Resolução de Permission Denied em items, claims, notifications e comments",
+        description: "Restauração do funcionamento ponta a ponta dos listeners em tempo real e operações de escrita após implantação das regras no banco remoto.",
+        module: "AUTH",
+        tag: "Persistência Real",
+      },
+    ],
+    stats: {
+      additionsCount: 2,
+      fixesCount: 2,
+    },
+  },
+  {
     version: "v1.9.39",
     codename: "Defensive Authorization Error Classification in Offline Sync",
     releaseDate: "30/09/2026",
     releaseDateTime: "30 de Setembro de 2026 • 19:35 BRT",
     type: "PATCH",
-    isCurrent: true,
+    isCurrent: false,
     summary: "Correção na classificação e tratamento de erros de permissão do Firestore: 1) Classificação estrita de 'permission-denied' como categoria AUTHORIZATION (isPermanent: true), desvinculando-o categoricamente de erros transitórios de rede; 2) Preservação integral do código ('permission-denied'), nome ('FirebaseError') e mensagem original ('Missing or insufficient permissions.'); 3) Tratamento adequado na interface com mensagem explícita de recusa por autorização/permissão, mantendo o item seguro na fila offline IndexedDB sem loops automáticos de retry; 4) Isolamento entre falhas transitórias de conectividade (unavailable, timeouts, rede) e recusas de permissão/autorização.",
     additions: [
       {

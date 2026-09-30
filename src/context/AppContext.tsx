@@ -2414,14 +2414,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Sync Claims from Firestore
+  // Sync Claims from Firestore (Admins/Servidores listen to all; regular users only query their own claimerId)
   useEffect(() => {
     if (!firebaseUser) {
       setClaims([]);
       return;
     }
+    const email = safeToLower(firebaseUser.email);
+    const isRoot = email === "paulocauan39@gmail.com";
+    const canViewAllClaims = isRoot || currentUser?.role === "ADMIN" || currentUser?.role === "SERVIDOR";
+
+    const claimsQuery = canViewAllClaims
+      ? collection(db, "claims")
+      : query(collection(db, "claims"), where("claimerId", "==", firebaseUser.uid));
+
     const unsubscribe = onSnapshot(
-      collection(db, "claims"),
+      claimsQuery,
       async (snapshot) => {
         if (snapshot.empty) {
           setClaims([]);
@@ -2435,7 +2443,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
     return () => unsubscribe();
-  }, [firebaseUser]);
+  }, [firebaseUser, currentUser?.role]);
 
   // Track seen notification IDs to only alert on newly arriving real-time notifications
   const initialNotifsLoadedRef = React.useRef(false);
@@ -2460,7 +2468,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notifsQuery = collection(db, "notifications");
     } else {
       const allowedTargets = Array.from(
-        new Set([currentUid, fbUid, "all", "todos_alunos", "todos", "global"].filter(Boolean))
+        new Set([currentUid, fbUid, "all", "todos_alunos", "todos"].filter(Boolean))
       ) as string[];
       notifsQuery = query(collection(db, "notifications"), where("userId", "in", allowedTargets));
     }
@@ -2514,8 +2522,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubscribe();
   }, [currentUser?.id, currentUser?.role, firebaseUser?.uid]);
 
-  // Sync Comments from Firestore
+  // Sync Comments from Firestore (Only authenticated users have access to comments per firestore.rules)
   useEffect(() => {
+    if (!firebaseUser) {
+      setComments([]);
+      return;
+    }
     const unsubscribe = onSnapshot(
       collection(db, "comments"),
       async (snapshot) => {
@@ -2532,7 +2544,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
     return () => unsubscribe();
-  }, []);
+  }, [firebaseUser]);
 
   const addCommentToItem = async (itemId: string, text: string) => {
     if (!text.trim()) return;

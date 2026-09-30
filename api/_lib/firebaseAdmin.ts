@@ -7,16 +7,24 @@ import { getFirestore, type Firestore } from "firebase-admin/firestore";
 let cachedAppConfig: any = null;
 function getLazyFirebaseAppConfig(): any {
   if (cachedAppConfig !== null) return cachedAppConfig;
-  try {
-    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-    if (fs.existsSync(configPath)) {
-      cachedAppConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      return cachedAppConfig;
-    }
-  } catch {
-    // Silent fallback in serverless environments where file may not exist or be bundled
+  const potentialPaths = [
+    path.join(process.cwd(), "firebase-applet-config.json"),
+    path.resolve(process.cwd(), "./firebase-applet-config.json"),
+    path.resolve(process.cwd(), "../firebase-applet-config.json"),
+    path.resolve(process.cwd(), "../../firebase-applet-config.json"),
+  ];
+  for (const p of potentialPaths) {
+    try {
+      if (fs.existsSync(p)) {
+        cachedAppConfig = JSON.parse(fs.readFileSync(p, "utf-8"));
+        return cachedAppConfig;
+      }
+    } catch (_) {}
   }
-  cachedAppConfig = {};
+  cachedAppConfig = {
+    projectId: "gen-lang-client-0490390966",
+    firestoreDatabaseId: "ai-studio-remixifprachados-018515d5-45e1-4bef-91e8-bdd980f85e66",
+  };
   return cachedAppConfig;
 }
 
@@ -46,7 +54,7 @@ export const FIRESTORE_DATABASE_ID =
   (process.env.FIRESTORE_DATABASE_ID && process.env.FIRESTORE_DATABASE_ID !== "default"
     ? process.env.FIRESTORE_DATABASE_ID
     : undefined) ||
-  "ai-studio-ifprachadosperdi-d3034e26-954c-413d-8c6d-f7e508afe8b1";
+  "ai-studio-remixifprachados-018515d5-45e1-4bef-91e8-bdd980f85e66";
 
 let adminAppInstance: App | null = null;
 let adminAuthInstance: Auth | null = null;
@@ -65,7 +73,7 @@ export function getFirebaseAdminApp(): App | null {
   const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
   const privateKey = formatPrivateKey(rawPrivateKey);
   const cfg = getLazyFirebaseAppConfig();
-  const projectId = FIREBASE_PROJECT_ID || cfg?.projectId || "ai-studio-ifprachadosperdi-d3034e26-954c-413d-8c6d-f7e508afe8b1";
+  const projectId = FIREBASE_PROJECT_ID || cfg?.projectId || "gen-lang-client-0490390966";
 
   try {
     if (clientEmail && privateKey) {

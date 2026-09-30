@@ -10,13 +10,24 @@ import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
 // Safe loading of firebase config to prevent Node 22 ESM import assertion errors
 let firebaseAppConfig: any = {};
-try {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    firebaseAppConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  }
-} catch (configErr) {
-  console.warn("[Firebase Config Notice] Não foi possível ler firebase-applet-config.json:", configErr);
+const potentialConfigPaths = [
+  path.join(process.cwd(), "firebase-applet-config.json"),
+  path.resolve(process.cwd(), "./firebase-applet-config.json"),
+  path.resolve(process.cwd(), "../firebase-applet-config.json"),
+];
+for (const configPath of potentialConfigPaths) {
+  try {
+    if (fs.existsSync(configPath)) {
+      firebaseAppConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      break;
+    }
+  } catch (_) {}
+}
+if (!firebaseAppConfig.projectId) {
+  firebaseAppConfig.projectId = "gen-lang-client-0490390966";
+}
+if (!firebaseAppConfig.firestoreDatabaseId) {
+  firebaseAppConfig.firestoreDatabaseId = "ai-studio-remixifprachados-018515d5-45e1-4bef-91e8-bdd980f85e66";
 }
 
 dotenv.config();
@@ -56,7 +67,7 @@ const FIREBASE_PROJECT_ID =
   process.env.FIREBASE_PROJECT_ID ||
   process.env.VITE_FIREBASE_PROJECT_ID ||
   (firebaseAppConfig as any)?.projectId ||
-  "ai-studio-ifprachadosperdi-d3034e26-954c-413d-8c6d-f7e508afe8b1";
+  "gen-lang-client-0490390966";
 
 let adminAppInstance: App | null = null;
 let adminAuthInstance: Auth | null = null;
@@ -131,7 +142,7 @@ export function getAdminFirestore(): Firestore | null {
       const dbId =
         (firebaseAppConfig as any)?.firestoreDatabaseId ||
         process.env.FIRESTORE_DATABASE_ID ||
-        "ai-studio-ifprachadosperdi-d3034e26-954c-413d-8c6d-f7e508afe8b1";
+        "ai-studio-remixifprachados-018515d5-45e1-4bef-91e8-bdd980f85e66";
       try {
         adminFirestoreInstance = getFirestore(adminApp, dbId);
       } catch {
@@ -187,7 +198,7 @@ app.use((req, res, next) => {
 
   res.header(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' https://apis.google.com https://*.firebaseapp.com https://*.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://images.unsplash.com https://api.dicebear.com https://*.dicebear.com https://*.googleusercontent.com https://*.gstatic.com https://*.googleapis.com https://*.firebasestorage.app https://firebasestorage.googleapis.com https://*.githubusercontent.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://generativelanguage.googleapis.com https://images.unsplash.com https://*.google.com wss://*.firebaseio.com; frame-src 'self' https://*.firebaseapp.com https://*.google.com; frame-ancestors 'self' https://*.google.com https://*.google.dev https://*.run.app https://*.web.app https://*.firebaseapp.com; object-src 'none'; base-uri 'self'; form-action 'self';"
+    "default-src 'self'; script-src 'self' https://apis.google.com https://*.firebaseapp.com https://*.googleapis.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://images.unsplash.com https://api.dicebear.com https://*.dicebear.com https://*.googleusercontent.com https://*.gstatic.com https://*.googleapis.com https://*.firebasestorage.app https://firebasestorage.googleapis.com https://*.githubusercontent.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://generativelanguage.googleapis.com https://images.unsplash.com https://*.google.com https://*.google-analytics.com https://www.googletagmanager.com wss://*.firebaseio.com; frame-src 'self' https://*.firebaseapp.com https://*.google.com; frame-ancestors 'self' https://*.google.com https://*.google.dev https://*.run.app https://*.web.app https://*.firebaseapp.com; object-src 'none'; base-uri 'self'; form-action 'self';"
   );
 
   if (req.method === "OPTIONS") {

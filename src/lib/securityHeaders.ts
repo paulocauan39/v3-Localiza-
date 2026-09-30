@@ -10,6 +10,7 @@ export const CSP_DIRECTIVES = {
     "https://apis.google.com",
     "https://*.firebaseapp.com",
     "https://*.googleapis.com",
+    "https://www.googletagmanager.com",
   ],
   "style-src": [
     "'self'",
@@ -45,6 +46,8 @@ export const CSP_DIRECTIVES = {
     "https://generativelanguage.googleapis.com",
     "https://images.unsplash.com",
     "https://*.google.com",
+    "https://*.google-analytics.com",
+    "https://www.googletagmanager.com",
     "wss://*.firebaseio.com",
   ],
   "frame-src": [
