@@ -1,0 +1,10 @@
+{
+  "name": "Remix IFPR Achados \u0026 Perdidos - Campus Ivaiporã",
+  "description": "Sistema institucional de cadastro, busca, inteligência artificial e devolução de objetos achados e perdidos do Instituto Federal do Paraná - Campus Ivaiporã.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

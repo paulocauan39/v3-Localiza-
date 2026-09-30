@@ -1,0 +1,727 @@
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+import { ITEM_FIELD_LIMITS } from "./constants";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+/**
+ * Returns today's date formatted as YYYY-MM-DD in local timezone (avoiding UTC timezone offset rollback).
+ */
+export function getTodayDateString(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Safely parses any date representation into a valid JavaScript Date object.
+ * Guaranteed to never throw RangeError or TypeError.
+ * Handles:
+ * - Firestore Timestamp objects (with .toDate() method)
+ * - Serialized Firestore Timestamps ({ seconds, nanoseconds } or { _seconds, _nanoseconds })
+ * - JavaScript Date instances (validating isNaN)
+ * - Unix timestamp numbers (in milliseconds or seconds)
+ * - Numeric timestamp strings (e.g. "1724600000000")
+ * - Brazilian date strings (e.g. "25/08/2026", "25/08/2026 14:30", "25-08-2026")
+ * - ISO strings (e.g. "2026-08-25T14:30:00Z", "2026-08-25")
+ * - Null, undefined, empty strings, "Invalid Date", or arbitrary malformed inputs (returns null)
+ */
+export function safeParseDate(input: unknown): Date | null {
+  if (input === null || input === undefined || input === "") {
+    return null;
+  }
+
+  try {
+    // 1. If already a Date object
+    if (input instanceof Date) {
+      return isNaN(input.getTime()) ? null : input;
+    }
+
+    // 2. If Firestore Timestamp instance with .toDate() method
+    if (typeof input === "object" && typeof (input as any).toDate === "function") {
+      const d = (input as any).toDate();
+      return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+    }
+
+    // 3. If serialized Firestore Timestamp { seconds, nanoseconds } or { _seconds, _nanoseconds }
+    if (typeof input === "object" && input !== null) {
+      const raw = input as Record<string, any>;
+      const seconds = raw.seconds ?? raw._seconds;
+      if (typeof seconds === "number" && !isNaN(seconds)) {
+        const nanoseconds = raw.nanoseconds ?? raw._nanoseconds ?? 0;
+        const ms = seconds * 1000 + Math.floor(nanoseconds / 1000000);
+        const d = new Date(ms);
+        return !isNaN(d.getTime()) ? d : null;
+      }
+    }
+
+    // 4. If number (Unix timestamp in ms or seconds)
+    if (typeof input === "number") {
+      if (isNaN(input) || !isFinite(input)) return null;
+      const ms = input > 1e11 ? input : input * 1000;
+      const d = new Date(ms);
+      return !isNaN(d.getTime()) ? d : null;
+    }
+
+    // 5. If string
+    if (typeof input === "string") {
+      const str = input.trim();
+      if (!str || str.toLowerCase() === "invalid date" || str.toLowerCase() === "null" || str.toLowerCase() === "undefined") {
+        return null;
+      }
+
+      // Check if numeric string
+      if (/^\d{9,16}$/.test(str)) {
+        const num = Number(str);
+        if (!isNaN(num)) {
+          const ms = num > 1e11 ? num : num * 1000;
+          const d = new Date(ms);
+          if (!isNaN(d.getTime())) return d;
+        }
+      }
+
+      // Check for Brazilian / European format DD/MM/YYYY or DD-MM-YYYY (with optional HH:mm:ss)
+      const brMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:[T\s](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+      if (brMatch) {
+        const day = parseInt(brMatch[1], 10);
+        const monthNum = parseInt(brMatch[2], 10);
+        const year = parseInt(brMatch[3], 10);
+        if (day < 1 || day > 31 || monthNum < 1 || monthNum > 12 || year < 1900 || year > 2100) {
+          return null;
+        }
+        const month = monthNum - 1;
+        const hour = brMatch[4] ? parseInt(brMatch[4], 10) : 0;
+        const minute = brMatch[5] ? parseInt(brMatch[5], 10) : 0;
+        const second = brMatch[6] ? parseInt(brMatch[6], 10) : 0;
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+          return null;
+        }
+        const d = new Date(year, month, day, hour, minute, second);
+        if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) {
+          return null;
+        }
+        return !isNaN(d.getTime()) ? d : null;
+      }
+
+      // Check for YYYY-MM-DD format without time
+      const isoDateMatch = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+      if (isoDateMatch) {
+        const year = parseInt(isoDateMatch[1], 10);
+        const monthNum = parseInt(isoDateMatch[2], 10);
+        const day = parseInt(isoDateMatch[3], 10);
+        if (day < 1 || day > 31 || monthNum < 1 || monthNum > 12 || year < 1900 || year > 2100) {
+          return null;
+        }
+        const month = monthNum - 1;
+        const d = new Date(year, month, day);
+        if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) {
+          return null;
+        }
+        return !isNaN(d.getTime()) ? d : null;
+      }
+
+      // Fallback standard Date parsing
+      const parsed = new Date(str);
+      if (isNaN(parsed.getTime())) return null;
+      if (parsed.getFullYear() < 1900 || parsed.getFullYear() > 2100) {
+        return null;
+      }
+      return parsed;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+/**
+ * Safely formats any date input into a Brazilian formatted date string: DD/MM/YYYY.
+ * Validates Firestore Timestamps (calling .toDate()), JS Date instances, unix timestamps,
+ * and strings. Returns 'Data não informada' for null, undefined, corrupted or invalid values,
+ * strictly preventing any 'RangeError: Invalid time value'.
+ */
+export function formatSafeDate(input: unknown, fallback = "Data não informada"): string {
+  if (input === null || input === undefined || input === "" || input === "null" || input === "undefined") {
+    return fallback;
+  }
+
+  // 1. Direct Firestore Timestamp object with .toDate() method
+  if (typeof input === "object" && typeof (input as any).toDate === "function") {
+    try {
+      const d = (input as any).toDate();
+      if (d instanceof Date && !isNaN(d.getTime())) {
+        return new Intl.DateTimeFormat("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        }).format(d);
+      }
+    } catch {
+      return fallback;
+    }
+  }
+
+  // 2. Parse through safe parser
+  const date = safeParseDate(input);
+  if (!date || isNaN(date.getTime())) return fallback;
+
+  try {
+    return new Intl.DateTimeFormat("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(date);
+  } catch {
+    try {
+      const d = String(date.getDate()).padStart(2, "0");
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const y = date.getFullYear();
+      return `${d}/${m}/${y}`;
+    } catch {
+      return fallback;
+    }
+  }
+}
+
+/**
+ * Standard alias for formatSafeDate
+ */
+export const formatDate = formatSafeDate;
+
+/**
+ * Formats any date input into a Brazilian formatted date & time string: DD/MM/YYYY HH:mm
+ * Guaranteed to never throw RangeError: Invalid time value.
+ */
+export function formatSafeDateTime(input: unknown, fallback = "Data não informada"): string {
+  if (input === null || input === undefined || input === "" || input === "null" || input === "undefined") {
+    return fallback;
+  }
+
+  // 1. Direct Firestore Timestamp object with .toDate() method
+  if (typeof input === "object" && typeof (input as any).toDate === "function") {
+    try {
+      const d = (input as any).toDate();
+      if (d instanceof Date && !isNaN(d.getTime())) {
+        return new Intl.DateTimeFormat("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(d);
+      }
+    } catch {
+      return fallback;
+    }
+  }
+
+  const date = safeParseDate(input);
+  if (!date || isNaN(date.getTime())) return fallback;
+  try {
+    return new Intl.DateTimeFormat("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    try {
+      const d = String(date.getDate()).padStart(2, "0");
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const y = date.getFullYear();
+      const h = String(date.getHours()).padStart(2, "0");
+      const min = String(date.getMinutes()).padStart(2, "0");
+      return `${d}/${m}/${y} ${h}:${min}`;
+    } catch {
+      return fallback;
+    }
+  }
+}
+
+export const formatDateTime = formatSafeDateTime;
+
+/**
+ * String Sanitization & Safe Case Transformation Utilities
+ * Guarantees null/undefined safety across search queries, filters, and comparisons.
+ */
+export function safeToLower(value: unknown, contextOrigin?: string): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.toLowerCase().trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value).toLowerCase().trim();
+  }
+  return "";
+}
+
+export function sanitizeQuery(query: unknown): string {
+  if (query === null || query === undefined) {
+    return "";
+  }
+  if (typeof query !== "string") {
+    return String(query).trim();
+  }
+  return query.trim();
+}
+
+export function safeIncludes(target: unknown, query: unknown): boolean {
+  const cleanTarget = safeToLower(target);
+  const cleanQuery = safeToLower(query);
+  if (!cleanQuery) return true;
+  if (!cleanTarget) return false;
+  return cleanTarget.includes(cleanQuery);
+}
+
+export function safeTextCorpus(...parts: unknown[]): string {
+  return parts
+    .map((p) => (p === null || p === undefined ? "" : String(p).toLowerCase().trim()))
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * Mobile Haptic Vibration API Helper
+ * Triggers vibration feedback on supported mobile devices for critical interactions
+ */
+export function triggerVibration(pattern: number | number[] = 35): boolean {
+  if (typeof window !== "undefined" && typeof navigator !== "undefined" && "vibrate" in navigator) {
+    try {
+      return navigator.vibrate(pattern);
+    } catch (_) {
+      return false;
+    }
+  }
+  return false;
+}
+
+export function vibrateClick(): boolean {
+  return triggerVibration(30);
+}
+
+export function vibrateSuccess(): boolean {
+  return triggerVibration([30, 50, 60]);
+}
+
+export function vibrateWarning(): boolean {
+  return triggerVibration([50, 40, 50]);
+}
+
+export function vibrateCritical(): boolean {
+  return triggerVibration([70, 50, 70]);
+}
+
+/**
+ * Checks if an item was registered / added within the last 24 hours (or custom hour window)
+ */
+export function isItemNew(
+  item: { createdAt?: unknown; date?: unknown; updatedAt?: unknown } | null | undefined,
+  maxHours = 24
+): boolean {
+  if (!item) return false;
+  const rawDate = item.createdAt ?? item.updatedAt ?? item.date;
+  const date = safeParseDate(rawDate);
+  if (!date) return false;
+  try {
+    const timestamp = date.getTime();
+    const now = Date.now();
+    const diffMs = now - timestamp;
+    // Allow small clock skew (up to 1 minute into future) and within maxHours
+    return diffMs >= -60000 && diffMs <= maxHours * 60 * 60 * 1000;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns a human-friendly age string for recent items (e.g., "Há 2 horas", "Há 45 min", "Hoje")
+ */
+export function getItemAgeText(input?: unknown, fallback = "Data não informada"): string {
+  const date = safeParseDate(input);
+  if (!date) return fallback;
+  try {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    if (isNaN(diffMs)) return formatDate(date, fallback);
+
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+
+    if (diffMinutes < 1) return "Agora mesmo";
+    if (diffMinutes < 60) return `Há ${diffMinutes} min`;
+    if (diffHours < 24) return `Há ${diffHours}h`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays === 1) return "Ontem";
+    if (diffDays < 7) return `Há ${diffDays} dias`;
+    return formatDate(date, fallback);
+  } catch {
+    return formatDate(date, fallback);
+  }
+}
+
+/**
+ * Formats a Brazilian phone number up to 11 digits: (XX) 9XXXX-XXXX (mobile) or (XX) XXXX-XXXX (landline).
+ * Supports automatic stripping of the +55 country code when pasted.
+ */
+export function formatPhone(value: string): string {
+  if (!value) return "";
+  let digits = value.replace(/\D/g, "");
+  // Handle Brazilian country code (+55) when pasted
+  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+    digits = digits.slice(2);
+  }
+  digits = digits.slice(0, 11);
+  if (digits.length === 0) return "";
+  if (digits.length <= 2) return `(${digits}`;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
+}
+
+/**
+ * Validates whether a given string is a valid Brazilian phone number (10 or 11 digits).
+ * Validates Brazilian DDD (11-99), 9-digit mobile prefix, and rejects invalid sequences.
+ */
+export function isValidPhone(value: string): boolean {
+  if (!value) return false;
+  let digits = value.replace(/\D/g, "");
+  // Handle Brazilian country code (+55) when pasted
+  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+    digits = digits.slice(2);
+  }
+  // Must have exactly 10 (landline) or 11 (mobile) digits
+  if (digits.length !== 10 && digits.length !== 11) return false;
+
+  // DDD must be between 11 and 99
+  const ddd = parseInt(digits.slice(0, 2), 10);
+  if (isNaN(ddd) || ddd < 11 || ddd > 99) return false;
+
+  // If 11 digits (mobile), the 3rd digit (first digit after DDD) must be 9
+  if (digits.length === 11 && digits.charAt(2) !== "9") {
+    return false;
+  }
+
+  // If 10 digits (landline), the 3rd digit is between 2 and 8
+  if (digits.length === 10 && !/^[2-8]/.test(digits.charAt(2))) {
+    return false;
+  }
+
+  // Reject sequence of repeated identical digits (e.g. 00000000000, 11111111111)
+  if (/^(\d)\1+$/.test(digits)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Recursively strips all `undefined` values from an object or array before persisting to Firestore.
+ * Firestore strictly rejects documents containing `undefined` with the error:
+ * "Function setDoc() called with invalid data. Unsupported field value: undefined"
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return null as any;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => (item === undefined ? null : sanitizeForFirestore(item))) as any;
+  }
+  if (typeof data === "object" && !(data instanceof Date)) {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        cleaned[key] = sanitizeForFirestore(value);
+      }
+    }
+    return cleaned as any;
+  }
+  return data;
+}
+
+/**
+ * Generates a cryptographically secure 128-bit random token for remote digital signature verification.
+ */
+export function generateSecureSignatureToken(prefix = "sig_"): string {
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const array = new Uint8Array(16);
+    crypto.getRandomValues(array);
+    const hex = Array.from(array, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${prefix}${hex}`;
+  }
+  return `${prefix}${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 12)}`;
+}
+
+/**
+ * Checks whether a given date representation refers to a future calendar date
+ * compared to today in the local timezone.
+ *
+ * Prevents timezone false positives by normalizing the comparison to local calendar dates
+ * (YYYY-MM-DD) or midnight boundaries.
+ *
+ * @param input Date string (YYYY-MM-DD, DD/MM/YYYY, ISO), Date instance, Timestamp or unix timestamp
+ * @param nowReference Optional reference date (defaults to new Date())
+ * @returns boolean true if the date is strictly in the future, false otherwise
+ */
+export function isFutureDate(input: unknown, nowReference: Date = new Date()): boolean {
+  if (input === null || input === undefined || input === "") {
+    return false;
+  }
+
+  // 1. If string in format YYYY-MM-DD, compare directly against local today YYYY-MM-DD
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    const isoMatch = trimmed.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+    if (isoMatch) {
+      const year = parseInt(isoMatch[1], 10);
+      const month = String(parseInt(isoMatch[2], 10)).padStart(2, "0");
+      const day = String(parseInt(isoMatch[3], 10)).padStart(2, "0");
+      const inputYmd = `${year}-${month}-${day}`;
+
+      const refYear = nowReference.getFullYear();
+      const refMonth = String(nowReference.getMonth() + 1).padStart(2, "0");
+      const refDay = String(nowReference.getDate()).padStart(2, "0");
+      const todayYmd = `${refYear}-${refMonth}-${refDay}`;
+
+      return inputYmd > todayYmd;
+    }
+
+    // Brazilian format DD/MM/YYYY
+    const brMatch = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (brMatch) {
+      const day = String(parseInt(brMatch[1], 10)).padStart(2, "0");
+      const month = String(parseInt(brMatch[2], 10)).padStart(2, "0");
+      const year = parseInt(brMatch[3], 10);
+      const inputYmd = `${year}-${month}-${day}`;
+
+      const refYear = nowReference.getFullYear();
+      const refMonth = String(nowReference.getMonth() + 1).padStart(2, "0");
+      const refDay = String(nowReference.getDate()).padStart(2, "0");
+      const todayYmd = `${refYear}-${refMonth}-${refDay}`;
+
+      return inputYmd > todayYmd;
+    }
+  }
+
+  // 2. Safe parse input
+  const parsed = safeParseDate(input);
+  if (!parsed || isNaN(parsed.getTime())) {
+    return false;
+  }
+
+  // Normalize parsed date to local midnight
+  const inputMidnight = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0);
+  // Normalize reference date to local midnight
+  const todayMidnight = new Date(nowReference.getFullYear(), nowReference.getMonth(), nowReference.getDate(), 0, 0, 0, 0);
+
+  return inputMidnight.getTime() > todayMidnight.getTime();
+}
+
+/**
+ * Validates an item occurrence date, ensuring it is provided, well-formed, and not in the future.
+ * Returns { isValid: boolean, error?: string }.
+ */
+export function validateItemOccurrenceDate(
+  dateInput: unknown,
+  fieldName = "Data da ocorrência"
+): { isValid: boolean; error?: string } {
+  if (dateInput === null || dateInput === undefined || String(dateInput).trim() === "") {
+    return { isValid: false, error: `${fieldName} é obrigatória.` };
+  }
+
+  const str = String(dateInput).trim();
+  const parsed = safeParseDate(str);
+  if (!parsed || isNaN(parsed.getTime())) {
+    return { isValid: false, error: `${fieldName} inválida.` };
+  }
+
+  if (isFutureDate(str)) {
+    return {
+      isValid: false,
+      error: `${fieldName} não pode ser posterior à data atual (não são permitidas datas futuras).`,
+    };
+  }
+
+  return { isValid: true };
+}
+
+export { ITEM_FIELD_LIMITS };
+
+export interface ItemTextFieldsToValidate {
+  title?: string | null;
+  description?: string | null;
+  location?: string | null;
+  color?: string | null;
+  brand?: string | null;
+  contactInfo?: string | null;
+}
+
+export interface ItemFieldValidationResult {
+  isValid: boolean;
+  error?: string;
+  field?: keyof ItemTextFieldsToValidate;
+  currentLength?: number;
+  maxLength?: number;
+}
+
+/**
+ * Validação rigorosa dos limites de caracteres dos campos de texto de ocorrências
+ * (Achados e Perdidos IFPR Campus Ivaiporã).
+ *
+ * Utilizada como Defesa em Profundidade:
+ * 1) No formulário de cadastro (RegisterItemView);
+ * 2) No formulário de edição (ItemDetailModal);
+ * 3) Na camada de processamento e pré-persistência de dados (addItem e updateItemData em AppContext);
+ * 4) No fluxo offline antes de qualquer gravação local ou enfileiramento.
+ *
+ * @param fields Campos a serem auditados e validados
+ * @param isPartial Se true, valida apenas campos definidos (edição parcial)
+ */
+export function validateItemTextFields(
+  fields: ItemTextFieldsToValidate,
+  isPartial = false
+): ItemFieldValidationResult {
+  // 1. Título (Obrigatório no cadastro, opcional na edição parcial)
+  if (fields.title !== undefined && fields.title !== null) {
+    const title = String(fields.title);
+    if (!isPartial && !title.trim()) {
+      return {
+        isValid: false,
+        error: "O título do objeto é obrigatório.",
+        field: "title",
+        currentLength: 0,
+        maxLength: ITEM_FIELD_LIMITS.TITLE,
+      };
+    }
+    if (title.length > ITEM_FIELD_LIMITS.TITLE) {
+      return {
+        isValid: false,
+        error: `O título do objeto não pode ultrapassar ${ITEM_FIELD_LIMITS.TITLE} caracteres (atualmente com ${title.length}).`,
+        field: "title",
+        currentLength: title.length,
+        maxLength: ITEM_FIELD_LIMITS.TITLE,
+      };
+    }
+  } else if (!isPartial) {
+    return {
+      isValid: false,
+      error: "O título do objeto é obrigatório.",
+      field: "title",
+      currentLength: 0,
+      maxLength: ITEM_FIELD_LIMITS.TITLE,
+    };
+  }
+
+  // 2. Descrição (Obrigatória no cadastro, opcional na edição parcial)
+  if (fields.description !== undefined && fields.description !== null) {
+    const desc = String(fields.description);
+    if (!isPartial && !desc.trim()) {
+      return {
+        isValid: false,
+        error: "A descrição do objeto é obrigatória.",
+        field: "description",
+        currentLength: 0,
+        maxLength: ITEM_FIELD_LIMITS.DESCRIPTION,
+      };
+    }
+    if (desc.length > ITEM_FIELD_LIMITS.DESCRIPTION) {
+      return {
+        isValid: false,
+        error: `A descrição do objeto não pode ultrapassar ${ITEM_FIELD_LIMITS.DESCRIPTION} caracteres (atualmente com ${desc.length}).`,
+        field: "description",
+        currentLength: desc.length,
+        maxLength: ITEM_FIELD_LIMITS.DESCRIPTION,
+      };
+    }
+  } else if (!isPartial) {
+    return {
+      isValid: false,
+      error: "A descrição do objeto é obrigatória.",
+      field: "description",
+      currentLength: 0,
+      maxLength: ITEM_FIELD_LIMITS.DESCRIPTION,
+    };
+  }
+
+  // 3. Localização (Obrigatória no cadastro, opcional na edição parcial)
+  if (fields.location !== undefined && fields.location !== null) {
+    const loc = String(fields.location);
+    if (!isPartial && !loc.trim()) {
+      return {
+        isValid: false,
+        error: "O local do objeto é obrigatório.",
+        field: "location",
+        currentLength: 0,
+        maxLength: ITEM_FIELD_LIMITS.LOCATION,
+      };
+    }
+    if (loc.length > ITEM_FIELD_LIMITS.LOCATION) {
+      return {
+        isValid: false,
+        error: `O local do objeto não pode ultrapassar ${ITEM_FIELD_LIMITS.LOCATION} caracteres (atualmente com ${loc.length}).`,
+        field: "location",
+        currentLength: loc.length,
+        maxLength: ITEM_FIELD_LIMITS.LOCATION,
+      };
+    }
+  } else if (!isPartial) {
+    return {
+      isValid: false,
+      error: "O local do objeto é obrigatório.",
+      field: "location",
+      currentLength: 0,
+      maxLength: ITEM_FIELD_LIMITS.LOCATION,
+    };
+  }
+
+  // 4. Cor (Opcional, mas se preenchida deve respeitar o limite)
+  if (fields.color !== undefined && fields.color !== null) {
+    const color = String(fields.color);
+    if (color.length > ITEM_FIELD_LIMITS.COLOR) {
+      return {
+        isValid: false,
+        error: `A cor do objeto não pode ultrapassar ${ITEM_FIELD_LIMITS.COLOR} caracteres (atualmente com ${color.length}).`,
+        field: "color",
+        currentLength: color.length,
+        maxLength: ITEM_FIELD_LIMITS.COLOR,
+      };
+    }
+  }
+
+  // 5. Marca (Opcional, mas se preenchida deve respeitar o limite)
+  if (fields.brand !== undefined && fields.brand !== null) {
+    const brand = String(fields.brand);
+    if (brand.length > ITEM_FIELD_LIMITS.BRAND) {
+      return {
+        isValid: false,
+        error: `A marca do objeto não pode ultrapassar ${ITEM_FIELD_LIMITS.BRAND} caracteres (atualmente com ${brand.length}).`,
+        field: "brand",
+        currentLength: brand.length,
+        maxLength: ITEM_FIELD_LIMITS.BRAND,
+      };
+    }
+  }
+
+  // 6. Contato / Ponto de guarda (Opcional, mas se preenchido deve respeitar o limite)
+  if (fields.contactInfo !== undefined && fields.contactInfo !== null) {
+    const contact = String(fields.contactInfo);
+    if (contact.length > ITEM_FIELD_LIMITS.CONTACT_INFO) {
+      return {
+        isValid: false,
+        error: `As informações de contato não podem ultrapassar ${ITEM_FIELD_LIMITS.CONTACT_INFO} caracteres (atualmente com ${contact.length}).`,
+        field: "contactInfo",
+        currentLength: contact.length,
+        maxLength: ITEM_FIELD_LIMITS.CONTACT_INFO,
+      };
+    }
+  }
+
+  return { isValid: true };
+}

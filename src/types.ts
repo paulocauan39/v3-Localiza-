@@ -1,0 +1,746 @@
+export type ItemStatus =
+  | "PERDIDO"
+  | "ENCONTRADO"
+  | "DISPONIVEL"
+  | "EM_ANALISE"
+  | "PROPRIETARIO_IDENTIFICADO"
+  | "DEVOLVIDO"
+  | "ENCERRADO";
+
+export type ItemCategory =
+  | "Eletrônicos"
+  | "Documentos & Cartões"
+  | "Roupas & Calçados"
+  | "Chaves"
+  | "Material Escolar & Livros"
+  | "Acessórios & Bijuterias"
+  | "Garrafas & Marmitas"
+  | "Guarda-chuvas"
+  | "Outros";
+
+export type UserRole = "ALUNO" | "SERVIDOR" | "ADMIN" | "INTRUSO";
+export type ApprovalStatus = "APROVADO" | "PENDENTE" | "REJEITADO";
+export type AccountStatus = "active" | "suspended" | "banned";
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  courseOrDept: string;
+  registrationNumber: string; // Matrícula
+  avatarUrl: string;
+  phone?: string;
+  approvalStatus?: ApprovalStatus;
+  reputationScore?: number;
+  status?: AccountStatus;
+  statusReason?: string;
+  statusUpdatedAt?: string;
+  statusUpdatedBy?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  statusChangedByName?: string;
+  statusChangedByEmail?: string;
+  suspendedUntil?: string;
+  createdAt?: string;
+  emailVerified?: boolean;
+}
+
+export interface ItemHistoryLog {
+  id: string;
+  action: string;
+  actorName: string;
+  actorRole: UserRole;
+  actorId: string;
+  userId?: string;
+  userName?: string;
+  userRole?: UserRole;
+  timestamp: string;
+  details?: string;
+  fieldChanged?: string;
+  oldValue?: string;
+  newValue?: string;
+  objectId?: string;
+  transactionId?: string;
+}
+
+export interface LostFoundItem {
+  id: string;
+  title: string;
+  category: ItemCategory;
+  type: "PERDIDO" | "ENCONTRADO";
+  status: ItemStatus;
+  description: string;
+  color: string;
+  brand: string;
+  location: string;
+  date: string;
+  imageUrl: string;
+  additionalImages?: string[];
+  contactInfo: string;
+  registeredByUserId: string;
+  registeredByName: string;
+  registeredByRole: UserRole;
+  qrCodeId: string;
+  createdAt: string;
+  matchedWithItemId?: string;
+  resolutionDate?: string;
+  secretVerificationHint?: string; // Dica/pergunta sobre recurso oculta
+  secretVerificationKey?: string; // Senha, PIN, código de barras/série ou padrão cadastrado (RNF04)
+  
+  // Independent operation tracking fields
+  lastEditedByUserId?: string;
+  lastEditedByName?: string;
+  lastEditedByRole?: UserRole;
+  lastEditedAt?: string;
+
+  returnedByUserId?: string;
+  returnedByName?: string;
+  returnedByRole?: UserRole;
+  returnDate?: string;
+  returnTime?: string;
+  recipientName?: string;
+  recipientEmail?: string;
+  recipientBond?: string;
+  recipientDocument?: string;
+  returnObservations?: string;
+  receiptValidationCode?: string;
+
+  // Digital Signature & Proof of Receipt
+  recipientSignatureUrl?: string;
+  recipientSignatureType?: "IN_PERSON_DEVICE" | "REMOTE_EMAIL" | "PRE_VERIFIED";
+  recipientSignatureStatus?: "SIGNED" | "PENDING_REMOTE" | "NOT_REQUIRED";
+  recipientSignatureName?: string;
+  recipientSignatureEmail?: string;
+  recipientSignatureBond?: string;
+  recipientSignatureDate?: string;
+  signatureToken?: string;
+  signatureTokenUsed?: boolean;
+  signatureTokenExpiresAt?: string;
+  signedAt?: string;
+  signatureIpOrDevice?: string;
+
+  // Deadline & Unclaimed destination tracking
+  storageDeadlineDays?: number;
+  storageDeadlineDate?: string;
+  data_limite?: string;
+  destinationReason?: string;
+  destinationType?: string;
+  destinationDate?: string;
+  destinationResponsible?: string;
+
+  // Timeline history log
+  history?: ItemHistoryLog[];
+  historyLogs?: ItemHistoryLog[];
+
+  // Offline Sync metadata
+  isOfflineQueued?: boolean;
+  syncedAt?: string;
+}
+
+export interface ItemReturnData {
+  recipientName: string;
+  recipientEmail: string;
+  recipientBond: string;
+  recipientDocument?: string;
+  identityVerified?: boolean;
+  returnObservations?: string;
+  observations?: string;
+  signatureType?: "IN_PERSON_DEVICE" | "REMOTE_EMAIL" | "PRE_VERIFIED";
+  signatureStatus?: "SIGNED" | "PENDING_REMOTE" | "NOT_REQUIRED";
+  signatureDataUrl?: string;
+  signatureToken?: string;
+  signedAt?: string;
+  signatureIpOrDevice?: string;
+}
+
+export type RegistrationStatus =
+  | "SAVING"
+  | "PENDING_SYNC"
+  | "CONFIRMED"
+  | "ERROR";
+
+export type SyncQueueStatus =
+  | "PENDENTE"
+  | "SINCRONIZANDO"
+  | "ERRO"
+  | "ERRO_TEMPORARIO"
+  | "ERRO_PERMANENTE"
+  | "CONCLUIDO";
+
+export interface SyncQueueEntry {
+  id: string;
+  itemId?: string;
+  type: "REGISTER_ITEM";
+  payload: LostFoundItem;
+  createdAt: string;
+  status: SyncQueueStatus;
+  attempts: number;
+  lastAttempt?: string;
+  error?: string;
+  errorType?: "TEMPORARY" | "PERMANENT" | "AUTHORIZATION";
+  payloadSizeBytes?: number;
+}
+
+export interface ItemClaim {
+  id: string;
+  itemId: string;
+  itemTitle: string;
+  claimerId: string;
+  claimerName: string;
+  claimerEmail: string;
+  claimerRole: UserRole;
+  verificationAnswer: string;
+  status: "PENDENTE" | "APROVADO" | "REJEITADO" | "CONCLUIDO";
+  createdAt: string;
+  notes?: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  type: "MATCH" | "CLAIM_UPDATE" | "SYSTEM" | "STATUS_CHANGE";
+  relatedItemId?: string;
+  isGlobal?: boolean;
+}
+
+export type BadgeTier = "BRONZE" | "PRATA" | "OURO" | "DIAMANTE";
+
+export interface UserBadge {
+  id: string;
+  name: string;
+  description: string;
+  iconName: string;
+  tier: BadgeTier;
+  unlocked: boolean;
+  unlockedAt?: string;
+  progress: number;
+  currentCount: number;
+  targetCount: number;
+  requirementText: string;
+  pointsReward: number;
+}
+
+export interface UserReputationInfo {
+  totalPoints: number;
+  level: number;
+  levelTitle: string;
+  levelTier: BadgeTier;
+  nextLevelPoints: number;
+  progressToNextLevel: number;
+  itemsReturnedCount: number;
+  itemsRegisteredFoundCount: number;
+  itemsRegisteredLostCount: number;
+  badges: UserBadge[];
+}
+
+export interface ItemFilterState {
+  searchQuery: string;
+  category: string;
+  type: "TODOS" | "PERDIDO" | "ENCONTRADO";
+  status: string;
+  location: string;
+  dateRange: string;
+  campusBlock?: string;
+  timePeriodPreset?: "TODOS" | "HOJE" | "7_DIAS" | "30_DIAS" | "SEMESTRE_ATUAL" | "CUSTOM";
+}
+
+export interface AIMatchResult {
+  matchScore: number; // 0 to 100
+  matchedItem: LostFoundItem;
+  reason: string;
+  matchedFeatures: string[];
+}
+
+export interface DashboardStats {
+  totalRegistered: number;
+  totalFound: number;
+  totalReturned: number;
+  successRate: number;
+  pendingClaims: number;
+}
+
+export interface ItemComment {
+  id: string;
+  itemId: string;
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  userAvatar?: string;
+  text: string;
+  createdAt: string;
+}
+
+export type AuditObjectType =
+  | "ITEM"
+  | "TEST_BATTERY"
+  | "TEST_CASE"
+  | "TEST_PARTICIPANT"
+  | "USER"
+  | "CLAIM"
+  | "RETURN"
+  | "DOCUMENT"
+  | "PROJECT_SETTINGS"
+  | "SYSTEM";
+
+export interface SystemAuditLog {
+  id: string;
+  transactionId: string;
+  objectId: string;
+  objectType: AuditObjectType;
+  objectTitle?: string;
+  action: string;
+  actorId: string;
+  actorName: string;
+  actorEmail: string;
+  actorRole: UserRole;
+  timestamp: string;
+  fieldChanged?: string;
+  oldValue?: string | null;
+  newValue?: string | null;
+  details: string;
+  ipAddress?: string;
+  userAgent?: string;
+  immutable: boolean;
+}
+
+export interface ActivityLog {
+  id: string;
+  adminId: string;
+  adminName: string;
+  transactionId?: string;
+  objectId?: string;
+  objectType?: AuditObjectType;
+  fieldChanged?: string;
+  oldValue?: string;
+  newValue?: string;
+  action:
+    | "EXCLUSAO_USUARIO"
+    | "MODO_MANUTENCAO"
+    | "ALTERACAO_PERMISSAO"
+    | "STATUS_CONTA_USUARIO"
+    | "SUSPENSAO_USUARIO"
+    | "BANIMENTO_USUARIO"
+    | "REATIVACAO_USUARIO"
+    | "STATUS_OVERRIDE"
+    | "RESET_SISTEMA"
+    | "NOVO_USUARIO"
+    | "EXCLUSAO_EM_MASSA"
+    | "APROVACAO_USUARIO"
+    | "REJEICAO_USUARIO"
+    | "BACKUP_SISTEMA"
+    | "CONFIG_BACKUP"
+    | "MENSAGEM_MANUTENCAO"
+    | "LIMPEZA_LOGS"
+    | "MASTER_WIPE"
+    | "CADASTRO_OCORRENCIA"
+    | "EDIT_OCORRENCIA"
+    | "GERACAO_ETIQUETA"
+    | "IDENTIFICACAO_PROPRIETARIO"
+    | "REGISTRO_DEVOLUCAO"
+    | "REABERTURA_DEVOLUCAO"
+    | "DESTINACAO_ITEM"
+    | "COMPROVANTE_GERADO"
+    | "RESULTADO_TESTE"
+    | "EVIDENCIA_TESTE"
+    | "CRIACAO_BATERIA"
+    | "CONCLUSAO_BATERIA"
+    | string;
+  details: string;
+  timestamp: string;
+}
+
+export interface BackupLog {
+  id: string;
+  adminId: string;
+  adminName: string;
+  filename: string;
+  fileSizeBytes: number;
+  itemCount: number;
+  userCount: number;
+  triggerType: "MANUAL" | "PROGRAMADO";
+  status: "SUCESSO" | "ERRO";
+  timestamp: string;
+}
+
+export interface BackupScheduleConfig {
+  enabled: boolean;
+  frequency: "A_CADA_12H" | "DIARIO_0200" | "SEMANAL_DOMINGO";
+  autoDownload: boolean;
+  lastBackupTimestamp?: string;
+  nextBackupTimestamp?: string;
+}
+
+export type UploadStatusType =
+  | "IDLE"
+  | "COMPRESSING"
+  | "SAVING_LOCAL"
+  | "QUEUED_SYNC"
+  | "UPLOADING"
+  | "COMPLETED"
+  | "ERROR";
+
+export interface UploadTaskStatus {
+  id: string;
+  itemId: string;
+  itemTitle: string;
+  itemType: "PERDIDO" | "ENCONTRADO";
+  thumbnailUrl?: string;
+  progress: number; // 0 to 100
+  status: UploadStatusType;
+  statusMessage: string;
+  originalSizeBytes?: number;
+  compressedSizeBytes?: number;
+  savingsPercentage?: number;
+  startedAt: string;
+  completedAt?: string;
+  error?: string;
+  isBackgroundSyncRegistered?: boolean;
+}
+
+export type SupportCategory = "BUG_REPORT" | "FEEDBACK" | "SUPPORT" | "BELONGING_QUERY" | "OTHER";
+
+export interface SupportFeedbackTicket {
+  id: string;
+  name: string;
+  email: string;
+  category: SupportCategory;
+  subject: string;
+  message: string;
+  priority?: "BAIXA" | "MEDIA" | "ALTA";
+  userId?: string;
+  userRole?: UserRole;
+  createdAt: string;
+  status: "NOVO" | "EM_ATENDIMENTO" | "RESOLVIDO";
+  userAgent?: string;
+  protocol: string;
+}
+
+// =========================================================================
+// MÓDULO DE DOCUMENTOS & MODELOS PDF EDITÁVEIS (PAINEL ADMINISTRATIVO)
+// =========================================================================
+
+export type DocumentFieldType = "text" | "textarea" | "date" | "number" | "select";
+
+export interface DocumentField {
+  id: string;
+  name: string; // e.g. "nome_organizacao", "responsavel", "contato", etc.
+  label: string; // Label no formulário
+  type: DocumentFieldType;
+  defaultValue?: string;
+  placeholder?: string;
+  required: boolean;
+  section?: string; // Agrupamento visual (ex: "1. Dados do Parceiro", "2. Dados da Equipe")
+  options?: string[]; // Opções para campo do tipo select
+}
+
+export type DocumentSectionType =
+  | "heading"
+  | "subheading"
+  | "paragraph"
+  | "numbered_section"
+  | "declarations_list"
+  | "signatures"
+  | "custom";
+
+export interface DocumentSection {
+  id: string;
+  title: string;
+  content: string; // Suporta marcações dinâmicas como {{nome_organizacao}}
+  type: DocumentSectionType;
+  fontSize?: number; // em pontos (pt)
+  isBold?: boolean;
+  isItalic?: boolean;
+  align?: "left" | "center" | "right" | "justify";
+  spacingBottom?: number; // em mm
+}
+
+export interface DocumentSignature {
+  id: string;
+  title: string; // ex: "Representante do Parceiro", "Representante da Equipe", "Professor Orientador"
+  nameTag?: string; // ex: "{{responsavel}}", "{{representante_equipe}}"
+  roleTag?: string; // ex: "{{cargo_responsavel}}", "Líder do Projeto de Extensão"
+  cpfOrDocTag?: string; // ex: "CPF: {{cpf_responsavel}}"
+}
+
+export interface DocumentTemplate {
+  id: string;
+  title: string; // ex: "Termo de Aceite do Parceiro de Extensão"
+  code: string; // ex: "EXT-ACEITE-01"
+  category: "EXTENSAO" | "ACHADOS_PERDIDOS" | "ESTAGIO" | "INSTITUCIONAL" | "RESPONSABILIDADE" | "DECLARACOES" | "RELATORIOS" | "OUTRO";
+  description: string;
+  status: "ATIVO" | "INATIVO";
+  version: number;
+  headerText: string;
+  institutionLogoUrl?: string;
+  includeLogo: boolean;
+  includeDocNumber: boolean;
+  includeHeader: boolean;
+  includeFooter: boolean;
+  footerText: string;
+  sections: DocumentSection[];
+  fields: DocumentField[];
+  signatures: DocumentSignature[];
+  createdAt: string;
+  updatedAt: string;
+  createdByName?: string;
+  createdByEmail?: string;
+}
+
+export type AppTab = "home" | "lost" | "found" | "register" | "dashboard" | "profile" | "image_analyzer";
+
+export interface PendingPostLoginAction {
+  action?: "REGISTER_ITEM" | "VIEW_ITEM" | "NAVIGATE";
+  tab: AppTab;
+  registerType?: "PERDIDO" | "ENCONTRADO";
+  prefilledItem?: Partial<LostFoundItem> | null;
+  message?: string;
+  customMessage?: string;
+}
+
+export interface GeneratedDocumentRecord {
+  id: string;
+  templateId: string;
+  templateTitle: string;
+  documentNumber: string;
+  recipientOrOrg: string;
+  fieldsData: Record<string, string>;
+  generatedByUserId: string;
+  generatedByName: string;
+  generatedByEmail?: string;
+  generatedAt: string;
+  fileSizeBytes?: number;
+  status?: "EMITIDO" | "RASCUNHO" | "ARQUIVADO";
+}
+
+// =========================================================================
+// DADOS DO PROJETO & INFORMAÇÕES PERMANENTES (CONFIGURAÇÕES DO SISTEMA)
+// =========================================================================
+
+export interface ProjectTeamMember {
+  id: string;
+  name: string;
+  registrationNumber: string; // Matrícula
+  role?: string; // Função no projeto
+  order?: number;
+}
+
+export interface ProjectProfessorInfo {
+  name: string; // Nome do professor responsável
+  title: string; // Titulação acadêmica (ex: Mestre, Doutor, Especialista)
+  role: string; // Cargo / Função (ex: Coordenador do Curso de Sistemas de Informação)
+}
+
+export interface ProjectInstitutionInfo {
+  name: string; // Nome da instituição (ex: Instituto Federal do Paraná)
+  campus: string; // Campus (ex: Campus Ivaiporã)
+  address: string; // Endereço (ex: Rua Max Arthur Greipel, nº 505 - Parque Industrial)
+  city: string; // Cidade (ex: Ivaiporã)
+  state: string; // UF (ex: PR)
+  zipCode: string; // CEP (ex: 86873-400)
+}
+
+export interface ProjectSettings {
+  teamName: string; // Nome da equipe (ex: InovaIF)
+  members: ProjectTeamMember[];
+  professor: ProjectProfessorInfo;
+  institution: ProjectInstitutionInfo;
+  updatedAt?: string;
+  updatedBy?: string;
+  updatedByEmail?: string;
+}
+
+// =========================================================================
+// BATERIA DE TESTES, PARTICIPANTES & GOVERNANÇA DO SISTEMA
+// =========================================================================
+
+export type TestStatus =
+  | "PENDENTE"
+  | "EM_EXECUCAO"
+  | "CONCLUIDO"
+  | "PROBLEMA"
+  | "NAO_SE_APLICA"
+  | "NAO_EXECUTADO"
+  | "APROVADO"
+  | "REPROVADO"
+  | "BLOQUEADO";
+
+export type TestPriority = "BAIXA" | "MEDIA" | "ALTA" | "CRITICA";
+
+export type TestBatteryStatus =
+  | "RASCUNHO"
+  | "EM_ANDAMENTO"
+  | "CONCLUIDA"
+  | "CONCLUIDO"
+  | "ARQUIVADA"
+  | "PLANEJADA"
+  | "ABERTA"
+  | "EM_EXECUCAO"
+  | "PAUSADA"
+  | "FINALIZADA"
+  | "CANCELADA";
+
+export type TestCategory =
+  | "AUTENTICACAO"
+  | "CADASTRO"
+  | "ACHADOS_PERDIDOS"
+  | "REIVINDICACOES"
+  | "QR_CODE"
+  | "IA_GEMINI"
+  | "PWA_MOBILE"
+  | "DOCUMENTOS"
+  | "NOTIFICACOES"
+  | "SEGURANCA"
+  | "APIS_PRODUCAO"
+  | "MONITORAMENTO";
+
+export interface TestParticipant {
+  id: string; // userId do sistema
+  name: string;
+  email: string;
+  globalRole: UserRole; // Aluno | Servidor | Administrador
+  contextualRole: "TESTADOR";
+  status: "ATIVO" | "INATIVO";
+  assignedCategories?: TestCategory[];
+  assignedTestCount?: number;
+  completedTestCount?: number;
+  passedTestCount?: number;
+  failedTestCount?: number;
+  addedAt: string;
+  addedBy: string;
+}
+
+export interface TestEvidence {
+  screenshotUrl?: string;
+  recordId?: string; // ID do registro criado no Firestore/Backend
+  requestId?: string;
+  protocol?: string;
+  logText?: string;
+  url?: string;
+  transactionId?: string;
+  technicalNotes?: string;
+  updatedAt?: string;
+}
+
+export interface TestCaseHistoryEntry {
+  timestamp: string;
+  previousStatus: TestStatus;
+  newStatus: TestStatus;
+  changedBy: string;
+  changedByEmail?: string;
+  reason?: string;
+}
+
+export interface TestCaseItem {
+  id: string;
+  category: TestCategory;
+  categoryName: string;
+  title: string;
+  description?: string;
+  preconditions?: string;
+  expectedResult: string;
+  obtainedResult: string;
+  status: TestStatus;
+  procedureSteps?: string[];
+  procedure?: string[];
+  isCriticalPersistence?: boolean;
+  assignedToUserId?: string;
+  assignedToName?: string;
+  assignedToEmail?: string;
+  evidence?: TestEvidence;
+  observations?: string;
+  startedAt?: string;
+  executedAt?: string;
+  executedBy?: string;
+  executedByEmail?: string;
+  testVersion?: string;
+  environment?: string;
+  priority?: TestPriority;
+  createdAt?: string;
+  history?: TestCaseHistoryEntry[];
+}
+
+export interface TestExecutionAuditEntry {
+  id: string;
+  changedAt: string;
+  changedBy: string;
+  changedByEmail: string;
+  changedByRole?: UserRole;
+  changeType:
+    | "CREATE"
+    | "UPDATE_STATUS"
+    | "UPDATE_DETAILS"
+    | "ADD_TEST"
+    | "EVIDENCE_ATTACHED"
+    | "DURATION_UPDATE"
+    | "EXECUTION_COMPLETE"
+    | "PARTICIPANT_ADDED"
+    | "PARTICIPANT_REMOVED"
+    | "ADD_PARTICIPANT"
+    | "REMOVE_PARTICIPANT"
+    | "TEST_ASSIGNED"
+    | "ASSIGN_TESTER"
+    | "AUTO_DISTRIBUTE"
+    | "BATTERY_STARTED"
+    | "BATTERY_PAUSED"
+    | "BATTERY_FINALIZED"
+    | "BATTERY_REOPENED"
+    | "BATTERY_EDITED"
+    | "BATTERY_ARCHIVED"
+    | "BATTERY_DELETED"
+    | "TEST_DELETED"
+    | "DELETE_TEST_CASE"
+    | "TEST_DUPLICATED"
+    | "TEST_UPDATED";
+  description: string;
+  previousStatus?: string;
+  newStatus?: string;
+  previousValue?: string;
+  oldValue?: string;
+  newValue?: string;
+  fieldChanged?: string;
+  testId?: string;
+  objectId?: string;
+  transactionId?: string;
+  reason?: string;
+}
+
+export interface TestBatteryExecution {
+  id: string; // Ex: BT-2026-001
+  title?: string;
+  name?: string;
+  description?: string;
+  testDate: string; // Formato YYYY-MM-DD (Editável)
+  startTime: string; // Formato HH:MM (Editável)
+  endTime: string; // Formato HH:MM (Editável)
+  startedRealTimestamp?: string;
+  startedBy?: string;
+  finalizedRealTimestamp?: string;
+  finalizedBy?: string;
+  responsible: string; // Nome do responsável (Editável)
+  responsibleEmail?: string;
+  environment: "Desenvolvimento" | "Homologação" | "Produção";
+  systemVersion: string; // Ex: v1.8.4 (Editável)
+  commitOrBuild?: string; // Ex: build-7c2a1e (Editável)
+  browser?: string; // Ex: Chrome 128 / Safari / Edge (Editável)
+  device?: string; // Ex: Desktop / Mobile / Tablet (Editável)
+  os?: string; // Ex: Windows 11 / Linux / Android (Editável)
+  participants?: TestParticipant[];
+  categories?: TestCategory[];
+  overallStatus: TestBatteryStatus | "EM_ANDAMENTO" | "CONCLUIDO" | "PARCIAL";
+  status?: TestBatteryStatus | "EM_ANDAMENTO" | "CONCLUIDO" | "PARCIAL";
+  observations: string;
+  tests: TestCaseItem[];
+  auditTrail?: TestExecutionAuditEntry[];
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  createdByEmail: string;
+}
+
+
+

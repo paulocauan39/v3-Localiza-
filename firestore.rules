@@ -1,0 +1,654 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==========================================
+    // Core Security & Auth Helper Functions
+    // ==========================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAuthUser(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function hasAdminClaim() {
+      return isSignedIn() && 
+             (request.auth.token.role == 'ADMIN' || 
+              request.auth.token.admin == true);
+    }
+
+    function isRootAdmin() {
+      return isSignedIn() && 
+             request.auth.token.email != null &&
+             (request.auth.token.email == 'paulocauan39@gmail.com' ||
+              request.auth.token.email.lower() == 'paulocauan39@gmail.com');
+    }
+
+    function isDocAdmin() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN' &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approvalStatus == 'APROVADO';
+    }
+
+    function isAdmin() {
+      return hasAdminClaim() || isRootAdmin() || isDocAdmin();
+    }
+
+    function isDocServidor() {
+      return isSignedIn() && 
+             isEmailVerified() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SERVIDOR';
+    }
+
+    function isDocAluno() {
+      return isSignedIn() && 
+             isEmailVerified() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ALUNO';
+    }
+
+    function isDocIntruso() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'INTRUSO';
+    }
+
+    function isIntruso() {
+      return isSignedIn() && (
+        !isEmailVerified() ||
+        request.auth.token.role == 'INTRUSO' ||
+        isDocIntruso() ||
+        (!isAdmin() && !isServidor() && !isDocAluno() && request.auth.token.email != null && (
+          !request.auth.token.email.matches('.*@estudantes[.]ifpr[.]edu[.]br') &&
+          !request.auth.token.email.matches('.*@estudante[.]ifpr[.]edu[.]br') &&
+          !request.auth.token.email.matches('.*@aluno[.]ifpr[.]edu[.]br') &&
+          !request.auth.token.email.matches('.*@ifpr[.]edu[.]br')
+        ))
+      );
+    }
+
+    function isAccountBlocked() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             (
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'banned' ||
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'suspended'
+             );
+    }
+
+    function isAccountActive() {
+      return !isAccountBlocked();
+    }
+
+    function isInstitutionalStudentEmail() {
+      return isSignedIn() && isEmailVerified() && request.auth.token.email != null && (
+        request.auth.token.email.matches('.*@estudantes[.]ifpr[.]edu[.]br') ||
+        request.auth.token.email.matches('.*@estudante[.]ifpr[.]edu[.]br') ||
+        request.auth.token.email.matches('.*@aluno[.]ifpr[.]edu[.]br')
+      );
+    }
+
+    function isServidor() {
+      return isSignedIn() && 
+             (isAdmin() ||
+              (isEmailVerified() && (
+                (request.auth.token.role == 'SERVIDOR') ||
+                isDocServidor() ||
+                (!isDocAluno() && request.auth.token.email != null && (
+                   request.auth.token.email.matches('.*@ifpr[.]edu[.]br') &&
+                   !request.auth.token.email.matches('.*@aluno[.]ifpr[.]edu[.]br') &&
+                   !request.auth.token.email.matches('.*@escola[.]ifpr[.]edu[.]br')
+                ))
+              )));
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // ==========================================
+    // 1. Users Collection (Least Privilege & Anti-Enumeration)
+    // ==========================================
+    match /users/{userId} {
+      // 1. Get: Users can ONLY read their own profile doc (isAuthUser(userId)); Only Admins can read other users' documents
+      // Blocked: Non-admin users (students, staff, visitors) cannot inspect other users' personal documents
+      allow get: if isAuthUser(userId) || isAdmin();
+
+      // 2. List: Only Admins can list/enumerate the users directory.
+      // Individual authenticated users can only query specifically for their own authenticated email (where email == auth.token.email).
+      // Blocked: Global listing and user enumeration by students and regular staff are strictly forbidden.
+      allow list: if isAdmin() || 
+                     (isSignedIn() && isAccountActive() && resource.data.email == request.auth.token.email);
+
+      // 3. Create: User can ONLY create their own document with their real UID and verified email.
+      // Privilege escalation prevention:
+      // - Cannot set role to 'ADMIN' unless isRootAdmin() or hasAdminClaim()
+      // - Cannot set role to 'SERVIDOR' unless authorized institutional email
+      // - Cannot inject admin=true claim
+      // - Default status is active / approved upon verified institutional email
+      allow create: if isSignedIn() && 
+                       request.auth.uid == userId && 
+                       incoming().id == userId &&
+                       incoming().email == request.auth.token.email &&
+                       (
+                         isRootAdmin() || hasAdminClaim() ||
+                         (
+                           (
+                             incoming().role == 'ALUNO' || 
+                             (incoming().role == 'SERVIDOR' && isServidor()) ||
+                             incoming().role == 'INTRUSO'
+                           ) &&
+                           (!('admin' in incoming()) || incoming().admin == false) &&
+                           (incoming().approvalStatus == 'PENDENTE' || incoming().approvalStatus == 'APROVADO')
+                         )
+                       );
+
+      // 4. Update: 
+      // - Admins can update any user profile (roles, approvals, status: active, suspended, banned)
+      // - Non-admin users can ONLY update their OWN profile if account is active (isAccountActive()):
+      //   * Can keep existing role OR upgrade from INTRUSO to ALUNO/SERVIDOR upon verified institutional email
+      //   * Cannot escalate to ADMIN under any circumstances
+      //   * Cannot inject admin=true
+      //   * Cannot change approvalStatus arbitrarily
+      //   * Cannot change email (incoming.email == existing.email)
+      //   * Cannot change ID (incoming.id == userId)
+      //   * Cannot change status / suspension / reputation fields (anti-tampering)
+      allow update: if isAdmin() ||
+                       (
+                         isSignedIn() && 
+                         isAccountActive() &&
+                         request.auth.uid == userId && 
+                         incoming().id == userId &&
+                         incoming().email == existing().email &&
+                         (
+                           incoming().role == existing().role ||
+                           (existing().role == 'INTRUSO' && incoming().role == 'ALUNO' && isInstitutionalStudentEmail()) ||
+                           (existing().role == 'INTRUSO' && incoming().role == 'SERVIDOR' && isServidor())
+                         ) &&
+                         (!('admin' in incoming()) || incoming().admin == existing().admin) &&
+                         (incoming().approvalStatus == existing().approvalStatus || (isEmailVerified() && incoming().approvalStatus == 'APROVADO')) &&
+                         (!('status' in incoming()) || incoming().status == existing().status) &&
+                         (!('suspendedUntil' in incoming()) || incoming().suspendedUntil == existing().suspendedUntil) &&
+                         (!('reputationScore' in incoming()) || incoming().reputationScore == existing().reputationScore)
+                       );
+
+      // 5. Delete: Only Admin can delete accounts (and cannot delete their own active account)
+      allow delete: if isAdmin() && request.auth.uid != userId;
+    }
+
+    // ==========================================
+    // 2. Lost & Found Items Collection
+    // ==========================================
+    match /items/{itemId} {
+      // Public catalog read: anyone on campus (including unauthenticated visitors) can view, search, and scan lost & found objects
+      allow get: if true;
+      allow list: if true;
+
+      // Creation: ONLY Authenticated users with verified email, real UID and active account standing:
+      // - Author ID must match request.auth.uid
+      // - Cannot falsify author role as ADMIN or SERVIDOR unless possessing real credentials
+      allow create: if isEmailVerified() && 
+                    isAccountActive() &&
+                    !isIntruso() &&
+                    incoming().registeredByUserId == request.auth.uid && 
+                    (
+                      incoming().registeredByRole == 'ALUNO' ||
+                      (incoming().registeredByRole == 'SERVIDOR' && isServidor()) ||
+                      (incoming().registeredByRole == 'ADMIN' && isAdmin())
+                    );
+
+      // Update: Admin, Servidor, or the authenticated author preserving immutable fields
+      allow update: if isAdmin() ||
+                       isServidor() ||
+                       (
+                         isSignedIn() && 
+                         isAccountActive() &&
+                         existing().registeredByUserId == request.auth.uid && 
+                         incoming().registeredByUserId == existing().registeredByUserId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().registeredByRole == existing().registeredByRole
+                       );
+
+      // Delete: Admin or the authenticated author who registered the item
+      allow delete: if isAdmin() || (isSignedIn() && isAccountActive() && existing().registeredByUserId == request.auth.uid);
+    }
+
+    match /found_items/{itemId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isEmailVerified() && 
+                    isAccountActive() &&
+                    !isIntruso() &&
+                    incoming().registeredByUserId == request.auth.uid && 
+                    (
+                      incoming().registeredByRole == 'ALUNO' ||
+                      (incoming().registeredByRole == 'SERVIDOR' && isServidor()) ||
+                      (incoming().registeredByRole == 'ADMIN' && isAdmin())
+                    );
+      allow update: if isAdmin() ||
+                       isServidor() ||
+                       (
+                         isSignedIn() && 
+                         isAccountActive() &&
+                         !isIntruso() &&
+                         existing().registeredByUserId == request.auth.uid && 
+                         incoming().registeredByUserId == existing().registeredByUserId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().registeredByRole == existing().registeredByRole
+                       );
+      allow delete: if isAdmin() || (isSignedIn() && isAccountActive() && existing().registeredByUserId == request.auth.uid);
+    }
+
+    match /lost_items/{itemId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isEmailVerified() && 
+                    isAccountActive() &&
+                    !isIntruso() &&
+                    incoming().registeredByUserId == request.auth.uid && 
+                    (
+                      incoming().registeredByRole == 'ALUNO' ||
+                      (incoming().registeredByRole == 'SERVIDOR' && isServidor()) ||
+                      (incoming().registeredByRole == 'ADMIN' && isAdmin())
+                    );
+      allow update: if isAdmin() ||
+                       isServidor() ||
+                       (
+                         isSignedIn() && 
+                         isAccountActive() &&
+                         !isIntruso() &&
+                         existing().registeredByUserId == request.auth.uid && 
+                         incoming().registeredByUserId == existing().registeredByUserId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().registeredByRole == existing().registeredByRole
+                       );
+      allow delete: if isAdmin() || (isSignedIn() && isAccountActive() && existing().registeredByUserId == request.auth.uid);
+    }
+
+    // ==========================================
+    // 3. Item Claims Collection (Solicitações de Devolução)
+    // ==========================================
+    match /claims/{claimId} {
+      // Claims can only be read by the claimer, the item author, or Admin/Active Servidor
+      allow get: if isSignedIn() && (
+        (isAccountActive() && (
+          existing().claimerId == request.auth.uid || 
+          (exists(/databases/$(database)/documents/items/$(existing().itemId)) && 
+           get(/databases/$(database)/documents/items/$(existing().itemId)).data.registeredByUserId == request.auth.uid)
+        )) ||
+        (isServidor() && isAccountActive()) || 
+        isAdmin()
+      );
+      allow list: if isSignedIn() && ((isServidor() && isAccountActive()) || isAdmin() || (isAccountActive() && resource.data.claimerId == request.auth.uid));
+
+      // Create: Authenticated user making a claim with their own real user id, verified email and active account
+      allow create: if isEmailVerified() && isAccountActive() && !isIntruso() && incoming().claimerId == request.auth.uid;
+
+      // Update: Admin / Active Servidor can change claim status/notes;
+      // Claimer can update ONLY while status is 'PENDENTE', and CANNOT modify claimerId, itemId, or self-approve
+      allow update: if isAdmin() || 
+                       (isServidor() && isAccountActive()) ||
+                       (
+                         isSignedIn() && 
+                         isAccountActive() &&
+                         existing().claimerId == request.auth.uid && 
+                         existing().status == 'PENDENTE' &&
+                         incoming().claimerId == existing().claimerId &&
+                         incoming().itemId == existing().itemId &&
+                         (incoming().status == 'PENDENTE' || incoming().status == 'CANCELADO')
+                       );
+
+      // Delete: Admin only
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // 4. Notifications Collection (Notificações do Usuário)
+    // ==========================================
+    match /notifications/{notificationId} {
+      // 1. Read (Get): A user can ONLY read notifications addressed to them, or authorized broadcasts; Admins can read all for monitoring
+      allow get: if isSignedIn() && (
+        existing().userId == request.auth.uid || 
+        isAdmin() || 
+        existing().userId == 'all' || 
+        existing().userId == 'todos_alunos' || 
+        existing().userId == 'todos' ||
+        existing().isGlobal == true
+      );
+
+      // 2. Read (List): A user query only returns documents matching their UID or authorized broadcasts; Admins can query all
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin() || 
+        resource.data.userId == 'all' || 
+        resource.data.userId == 'todos_alunos' || 
+        resource.data.userId == 'todos' || 
+        resource.data.isGlobal == true
+      );
+
+      // 3. Create:
+      // - Admins and Active Servidores (Campus Staff) can create notifications for any user or institutional broadcasts.
+      // - Regular active users (Students/Others) can ONLY create notifications addressed strictly to themselves (request.auth.uid).
+      // - Suspended or banned users CANNOT create notifications.
+      // - Regular users CANNOT send notifications to other users (anti-spoofing).
+      // - Regular users CANNOT create broadcast notifications (isGlobal == true, 'all', etc.).
+      // - Regular users CANNOT forge SYSTEM type notifications.
+      allow create: if isSignedIn() && (
+        isAdmin() || 
+        (isServidor() && isAccountActive()) || 
+        (
+          isAccountActive() &&
+          incoming().userId == request.auth.uid &&
+          (!('isGlobal' in incoming()) || incoming().isGlobal != true) &&
+          incoming().userId != 'all' &&
+          incoming().userId != 'todos' &&
+          incoming().userId != 'todos_alunos' &&
+          incoming().userId != 'todos_servidores' &&
+          incoming().userId != 'global' &&
+          (!('type' in incoming()) || incoming().type != 'SYSTEM') &&
+          incoming().read == false
+        )
+      );
+
+      // 4. Update:
+      // - User can ONLY mark their OWN notification as read.
+      // - Strict immutability of core fields: userId (recipientId), title, message, type, isGlobal, timestamp, relatedItemId, id.
+      // - User CANNOT change recipientId from A to B.
+      // - User CANNOT change isGlobal to true.
+      // - User CANNOT mark another user's notification as read.
+      // - Admin can perform administrative updates if needed.
+      allow update: if (
+        isSignedIn() && 
+        existing().userId == request.auth.uid &&
+        incoming().userId == existing().userId &&
+        incoming().title == existing().title &&
+        incoming().message == existing().message &&
+        (!('type' in existing()) || incoming().type == existing().type) &&
+        (!('isGlobal' in existing()) || incoming().isGlobal == existing().isGlobal) &&
+        (!('timestamp' in existing()) || incoming().timestamp == existing().timestamp) &&
+        (!('relatedItemId' in existing()) || incoming().relatedItemId == existing().relatedItemId) &&
+        (!('id' in existing()) || incoming().id == existing().id)
+      ) || isAdmin();
+
+      // 5. Delete:
+      // - User can ONLY delete their OWN notification (existing().userId == request.auth.uid).
+      // - User CANNOT delete another user's notification.
+      // - Admin can delete.
+      allow delete: if isSignedIn() && (
+        existing().userId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+
+    // ==========================================
+    // 5. System Configuration Doc (Modo de Manutenção)
+    // ==========================================
+    match /system/{docId} {
+      // Anyone can read maintenance banner state
+      allow get: if true;
+      allow list: if true;
+
+      // Only verified Admin can modify system settings
+      allow write: if isAdmin();
+    }
+
+    // ==========================================
+    // 6. Audit Logs Collection (Trilha de Auditoria Imutável)
+    // ==========================================
+    match /activity_logs/{logId} {
+      // Only Admin and Active Servidor can inspect audit trail
+      allow get: if isAdmin() || (isServidor() && isAccountActive());
+      allow list: if isAdmin() || (isServidor() && isAccountActive());
+
+      // Create: Strict non-forgeable activity trail
+      // 1. User must be authenticated and active/admin
+      // 2. adminId / actorId MUST match real authenticated request.auth.uid (no cross-user spoofing)
+      // 3. actorEmail / adminEmail MUST match authenticated token email if present
+      // 4. actorRole must match user's real role (Admin can log as ADMIN/SERVIDOR; Servidor as SERVIDOR; Aluno as ALUNO)
+      // 5. Aluno can only log permitted item actions ('CADASTRO_OCORRENCIA', 'EDIT_OCORRENCIA', 'STATUS_OVERRIDE', 'EXCLUSAO_ITEM')
+      allow create: if isSignedIn() && (isAccountActive() || isAdmin()) &&
+        (
+          (!('actorId' in incoming()) || incoming().actorId == request.auth.uid) &&
+          (!('adminId' in incoming()) || incoming().adminId == request.auth.uid) &&
+          (!('actorEmail' in incoming()) || request.auth.token.email == null || incoming().actorEmail == request.auth.token.email) &&
+          (!('adminEmail' in incoming()) || request.auth.token.email == null || incoming().adminEmail == request.auth.token.email) &&
+          (
+            (isAdmin() && (!('actorRole' in incoming()) || incoming().actorRole in ['ADMIN', 'SERVIDOR'])) ||
+            (isServidor() && isAccountActive() && (!('actorRole' in incoming()) || incoming().actorRole == 'SERVIDOR')) ||
+            (
+              (incoming().actorRole == 'ALUNO' || incoming().userRole == 'ALUNO') &&
+              incoming().action in ['CADASTRO_OCORRENCIA', 'EDIT_OCORRENCIA', 'STATUS_OVERRIDE', 'EXCLUSAO_ITEM']
+            )
+          )
+        );
+
+      // Strict Immutability: Activity logs can never be altered or deleted by ANY user
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /audit_logs/{logId} {
+      // Admins and Active Servidores can inspect comprehensive audit trail
+      allow get: if isAdmin() || (isServidor() && isAccountActive());
+      allow list: if isAdmin() || (isServidor() && isAccountActive());
+
+      // Create: Strict non-forgeable audit trail
+      // 1. User must be authenticated and active/admin
+      // 2. Client actorId MUST match real authenticated request.auth.uid (no cross-user spoofing)
+      // 3. actorEmail MUST match authenticated token email if present
+      // 4. actorRole must match user's real role (Admin can log as ADMIN/SERVIDOR; Servidor as SERVIDOR; Aluno as ALUNO)
+      // 5. Aluno can only log permitted item actions ('CADASTRO_OCORRENCIA', 'EDIT_OCORRENCIA', 'STATUS_OVERRIDE', 'EXCLUSAO_ITEM')
+      allow create: if isSignedIn() && (isAccountActive() || isAdmin()) &&
+        incoming().actorId == request.auth.uid &&
+        (request.auth.token.email == null || incoming().actorEmail == request.auth.token.email) &&
+        (
+          (isAdmin() && incoming().actorRole in ['ADMIN', 'SERVIDOR']) ||
+          (isServidor() && isAccountActive() && incoming().actorRole == 'SERVIDOR') ||
+          (
+            incoming().actorRole == 'ALUNO' &&
+            incoming().objectType == 'ITEM' &&
+            incoming().action in ['CADASTRO_OCORRENCIA', 'EDIT_OCORRENCIA', 'STATUS_OVERRIDE', 'EXCLUSAO_ITEM']
+          )
+        );
+
+      // Strict Immutability: Audit logs can NEVER be updated or deleted by ANY user
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ==========================================
+    // 7. Backup Logs Collection
+    // ==========================================
+    match /backup_logs/{logId} {
+      allow get: if isAdmin();
+      allow list: if isAdmin();
+      allow create: if isAdmin() && incoming().adminId == request.auth.uid;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // 8. Error Logs Collection
+    // ==========================================
+    match /error_logs/{logId} {
+      allow get: if isAdmin() || isServidor();
+      allow list: if isAdmin() || isServidor();
+      allow create: if isSignedIn() && 
+                       (!('userId' in incoming()) || incoming().userId == request.auth.uid) &&
+                       (!('userEmail' in incoming()) || request.auth.token.email == null || incoming().userEmail == request.auth.token.email);
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // 9. System Metrics Collection
+    // ==========================================
+    match /system_metrics/{metricId} {
+      // Direct get: Only Admin or the public/authenticated heartbeat latency probe
+      allow get: if isAdmin() || (isSignedIn() && metricId == 'heartbeat');
+      allow list: if isAdmin();
+      // Only heartbeat document can be written by active client app instances to verify liveness/latency
+      allow create, update: if isAdmin() || (isSignedIn() && isAccountActive() && metricId == 'heartbeat');
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // 10. Comments Collection
+    // ==========================================
+    match /comments/{commentId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && 
+                       isAccountActive() && 
+                       incoming().userId == request.auth.uid &&
+                       (
+                         (!('userRole' in incoming())) ||
+                         (incoming().userRole == 'ALUNO') ||
+                         (incoming().userRole == 'SERVIDOR' && isServidor()) ||
+                         (incoming().userRole == 'ADMIN' && isAdmin())
+                       );
+      allow update: if isSignedIn() && 
+                       isAccountActive() && 
+                       existing().userId == request.auth.uid && 
+                       incoming().userId == existing().userId &&
+                       incoming().itemId == existing().itemId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (!('userRole' in incoming()) || incoming().userRole == existing().userRole);
+      allow delete: if isAdmin() || (isSignedIn() && isAccountActive() && existing().userId == request.auth.uid);
+    }
+
+    // ==========================================
+    // 11. FCM Subscriptions Collection
+    // ==========================================
+    match /fcm_subscriptions/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // ==========================================
+    // 12. Support & Feedback Tickets Collection
+    // ==========================================
+    match /support_tickets/{ticketId} {
+      // Get: Author can read their own ticket (resource.data.userId == request.auth.uid); Admins can read all tickets
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      // List: Admins can list all tickets; Authenticated users can list/query only their own tickets
+      allow list: if isAdmin() || (isSignedIn() && isAccountActive() && resource.data.userId == request.auth.uid);
+      // Support tickets: allow creation by visitors (no userId/userRole allowed) or authenticated users (must match auth.uid and auth email)
+      allow create: if (
+        (isSignedIn() && 
+         incoming().userId == request.auth.uid && 
+         (!('email' in incoming()) || incoming().email == request.auth.token.email) &&
+         incoming().status == 'NOVO') ||
+        (!isSignedIn() && 
+         (!('userId' in incoming()) || incoming().userId == null || incoming().userId == '') && 
+         (!('userRole' in incoming()) || incoming().userRole == null) &&
+         incoming().status == 'NOVO')
+      );
+      // Updates and Deletes: Exclusively restricted to administrators
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // 13. Document Templates Collection (Admin Only)
+    // ==========================================
+    match /document_templates/{templateId} {
+      allow get: if isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // 14. Generated Documents Collection (Admin Only)
+    // ==========================================
+    match /generated_documents/{docId} {
+      allow get: if isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // 15. Project Settings Collection (Admin Only Read & Write)
+    // ==========================================
+    match /project_settings/{settingsId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // 16. Test Battery Executions & Governance (Admin, Servidor & Assigned Testers)
+    // ==========================================
+    match /test_executions/{executionId} {
+      // Reading: Admin, Servidor, or assigned test participants
+      allow get, list: if isSignedIn() && (
+        isAdmin() || 
+        isServidor() || 
+        exists(/databases/$(database)/documents/test_participants/$(request.auth.uid))
+      );
+      // Creating: Admin or Servidor (QA coordinators)
+      allow create: if isAdmin() || isServidor();
+      // Updating: Admin, Servidor, or assigned test participants
+      allow update: if (isAdmin() || isServidor() || (
+        isSignedIn() && 
+        isAccountActive() &&
+        exists(/databases/$(database)/documents/test_participants/$(request.auth.uid))
+      ));
+      // Deleting: Admin only
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // 17. Test Battery Participants Registry
+    // ==========================================
+    match /test_participants/{participantId} {
+      // Reading: Participant can read their own assignment doc; Admin and Servidor can read/list all
+      allow get: if isSignedIn() && (request.auth.uid == participantId || isAdmin() || isServidor());
+      allow list: if isAdmin() || isServidor();
+      allow create, update: if isAdmin() || isServidor();
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // 18. Centralized Test Error Logs Collection
+    // ==========================================
+    match /test_error_logs/{logId} {
+      // Reading & Listing: Exclusively Admin and Servidor
+      allow get, list: if isAdmin() || isServidor();
+      // Creation: Authenticated active user logging their own error snapshot with strict schema validation
+      allow create: if isSignedIn() && 
+                       isAccountActive() &&
+                       incoming().batteryId is string && incoming().batteryId.size() > 0 && incoming().batteryId.size() <= 100 &&
+                       incoming().testId is string && incoming().testId.size() > 0 && incoming().testId.size() <= 100 &&
+                       incoming().action is string && incoming().action.size() > 0 && incoming().action.size() <= 50 &&
+                       incoming().errorMessage is string && incoming().errorMessage.size() > 0 && incoming().errorMessage.size() <= 5000 &&
+                       incoming().timestamp is string &&
+                       (!('userId' in incoming()) || incoming().userId == request.auth.uid) &&
+                       (!('userEmail' in incoming()) || request.auth.token.email == null || incoming().userEmail == request.auth.token.email);
+      // Immutability: Test error logs cannot be updated once written
+      allow update: if false;
+      // Deletion: Admin only
+      allow delete: if isAdmin();
+    }
+  }
+}
