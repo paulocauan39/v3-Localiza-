@@ -135,8 +135,10 @@ export function getAdminAuth(): Auth | null {
   return adminAuthInstance;
 }
 
+let adminFirestoreError: string | null = null;
+
 export function getAdminFirestore(): Firestore | null {
-  if (!adminFirestoreInstance) {
+  if (!adminFirestoreInstance && !adminFirestoreError) {
     const adminApp = getFirebaseAdminApp();
     if (adminApp) {
       const dbId =
@@ -145,12 +147,11 @@ export function getAdminFirestore(): Firestore | null {
         "ai-studio-remixifprachados-018515d5-45e1-4bef-91e8-bdd980f85e66";
       try {
         adminFirestoreInstance = getFirestore(adminApp, dbId);
-      } catch {
-        try {
-          adminFirestoreInstance = getFirestore(adminApp);
-        } catch (e2: any) {
-          console.warn("[Firebase Admin Firestore Warning] Não foi possível carregar Firestore Admin:", e2?.message || e2);
-        }
+        adminFirestoreError = null;
+      } catch (err: any) {
+        adminFirestoreError = err?.message || String(err);
+        console.error(`[Firebase Admin Firestore Error] Falha ao conectar ao Firestore Database ID '${dbId}':`, adminFirestoreError);
+        adminFirestoreInstance = null;
       }
     }
   }
@@ -590,12 +591,45 @@ app.use((_req, _res, next) => {
 });
 
 // API System Configuration Endpoints (Works seamlessly online, in serverless & container environments)
-app.get(["/api/system/config", "/system/config"], (req: Request, res: Response) => {
+app.get(["/api/system/config", "/system/config"], async (req: Request, res: Response) => {
   try {
-    const config = getValidatedSystemConfig();
+    let currentConfig = getValidatedSystemConfig();
+    let firestoreStatus: "OK" | "NOT_INITIALIZED" | "OPERATION_FAILED" = "NOT_INITIALIZED";
+    let firestoreErrorDetails: string | null = null;
+
+    const firestore = getAdminFirestore();
+    if (firestore) {
+      try {
+        const docSnap = await firestore.collection("system").doc("config").get();
+        firestoreStatus = "OK";
+        if (docSnap.exists) {
+          const data = docSnap.data();
+          if (data) {
+            currentConfig = {
+              maintenanceMode: Boolean(data.maintenanceMode),
+              maintenanceCustomMessage:
+                typeof data.maintenanceCustomMessage === "string" && data.maintenanceCustomMessage.trim()
+                  ? data.maintenanceCustomMessage.trim()
+                  : DEFAULT_SYSTEM_CONFIG.maintenanceCustomMessage,
+              lastUpdated: data.lastUpdated || currentConfig.lastUpdated || new Date().toISOString(),
+              updatedBy: data.updatedBy || currentConfig.updatedBy || "SYSTEM",
+            };
+          }
+        }
+      } catch (fsErr: any) {
+        firestoreStatus = "OPERATION_FAILED";
+        firestoreErrorDetails = fsErr?.message || String(fsErr);
+        console.error("[System Config API] Firestore operation failed ao ler Firestore /system/config:", fsErr);
+      }
+    }
+
     return res.status(200).json({
       success: true,
-      config,
+      config: currentConfig,
+      firestoreDiagnostics: {
+        status: firestoreStatus,
+        error: firestoreErrorDetails,
+      },
       environment: {
         isVercel: Boolean(process.env.VERCEL),
         nodeEnv: process.env.NODE_ENV || "development",
@@ -1207,7 +1241,7 @@ app.get(["/api/health", "/health"], (_req, res) => {
 });
 
 // Analytics Tracking Endpoint (Google Analytics + Firebase Backend Receiver)
-app.post(["/api/analytics/track", "/analytics/track"], (req: Request, res: Response) => {
+app.post(["/api/analytics/track", "/analytics/track"], async (req: Request, res: Response) => {
   try {
     if (!req.body || typeof req.body !== "object") {
       console.warn("[Analytics Track Warning] Payload inválido recebido em /api/analytics/track", {
@@ -1255,7 +1289,30 @@ app.post(["/api/analytics/track", "/analytics/track"], (req: Request, res: Respo
 
     eventCounters[sanitizedEventName] = (eventCounters[sanitizedEventName] || 0) + 1;
 
-    return res.status(200).json({ success: true, logged: eventRecord });
+    let firestoreStatus: "OK" | "NOT_INITIALIZED" | "OPERATION_FAILED" = "NOT_INITIALIZED";
+    let firestoreErrorDetails: string | null = null;
+
+    const firestore = getAdminFirestore();
+    if (firestore) {
+      try {
+        const eventDocId = `evt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        await firestore.collection("analytics_events").doc(eventDocId).set(eventRecord);
+        firestoreStatus = "OK";
+      } catch (fsErr: any) {
+        firestoreStatus = "OPERATION_FAILED";
+        firestoreErrorDetails = fsErr?.message || String(fsErr);
+        console.error("[Analytics Track API] Firestore operation failed ao persistir no Firestore:", fsErr);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      logged: eventRecord,
+      firestoreDiagnostics: {
+        status: firestoreStatus,
+        error: firestoreErrorDetails,
+      },
+    });
   } catch (err: any) {
     console.error("[Analytics Track Error] Falha ao processar telemetria:", {
       message: err?.message || String(err),

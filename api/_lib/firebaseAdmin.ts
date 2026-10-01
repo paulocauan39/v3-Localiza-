@@ -59,6 +59,7 @@ export const FIRESTORE_DATABASE_ID =
 let adminAppInstance: App | null = null;
 let adminAuthInstance: Auth | null = null;
 let adminFirestoreInstance: Firestore | null = null;
+let adminFirestoreError: string | null = null;
 
 export function getFirebaseAdminApp(): App | null {
   if (adminAppInstance) return adminAppInstance;
@@ -125,20 +126,36 @@ export function getAdminAuth(): Auth | null {
 }
 
 export function getAdminFirestore(): Firestore | null {
-  if (!adminFirestoreInstance) {
+  if (!adminFirestoreInstance && !adminFirestoreError) {
     const adminApp = getFirebaseAdminApp();
     if (adminApp) {
       try {
+        // Explicitly initialize with FIRESTORE_DATABASE_ID. No silent fallback to default database.
         adminFirestoreInstance = getFirestore(adminApp, FIRESTORE_DATABASE_ID);
-      } catch {
-        try {
-          adminFirestoreInstance = getFirestore(adminApp);
-        } catch (e2: any) {
-          console.warn("[Firebase Admin Firestore Warning] Não foi possível carregar Firestore Admin:", e2?.message || e2);
-        }
+        adminFirestoreError = null;
+      } catch (err: any) {
+        adminFirestoreError = err?.message || String(err);
+        console.error(`[Firebase Admin Firestore Error] Falha ao conectar ao Firestore Database ID '${FIRESTORE_DATABASE_ID}':`, adminFirestoreError);
+        // Do NOT silently fallback to getFirestore(adminApp) default database
+        adminFirestoreInstance = null;
       }
     }
   }
   return adminFirestoreInstance;
+}
+
+export function getAdminDiagnostics() {
+  const adminApp = getFirebaseAdminApp();
+  const adminAuth = getAdminAuth();
+  const adminFirestore = getAdminFirestore();
+
+  return {
+    projectId: FIREBASE_PROJECT_ID,
+    firestoreDatabaseId: FIRESTORE_DATABASE_ID,
+    adminAppInitialized: Boolean(adminApp),
+    adminAuthInitialized: Boolean(adminAuth),
+    adminFirestoreInitialized: Boolean(adminFirestore),
+    adminFirestoreError,
+  };
 }
 

@@ -67,10 +67,14 @@ export default async function handler(req: any, res: any) {
     try {
       let currentConfig: SystemConfigState = { ...localConfigState };
 
+      let firestoreStatus: "OK" | "NOT_INITIALIZED" | "OPERATION_FAILED" = "NOT_INITIALIZED";
+      let firestoreErrorDetails: string | null = null;
+
       const firestore = getAdminFirestore();
       if (firestore) {
         try {
           const docSnap = await firestore.collection("system").doc("config").get();
+          firestoreStatus = "OK";
           if (docSnap.exists) {
             const data = docSnap.data();
             currentConfig = {
@@ -85,13 +89,19 @@ export default async function handler(req: any, res: any) {
             localConfigState = currentConfig;
           }
         } catch (fsErr: any) {
-          console.warn("[System Config API] Aviso ao ler Firestore /system/config:", fsErr?.message || fsErr);
+          firestoreStatus = "OPERATION_FAILED";
+          firestoreErrorDetails = fsErr?.message || String(fsErr);
+          console.error("[System Config API] Firestore operation failed ao ler Firestore /system/config:", fsErr);
         }
       }
 
       return res.status(200).json({
         success: true,
         config: currentConfig,
+        firestoreDiagnostics: {
+          status: firestoreStatus,
+          error: firestoreErrorDetails,
+        },
         environment: {
           isVercel: Boolean(process.env.VERCEL),
           nodeEnv: process.env.NODE_ENV || "production",

@@ -106,20 +106,29 @@ export default async function handler(req: any, res: any) {
     }
 
     // Persist real analytics record to Firestore if available
+    let firestoreStatus: "OK" | "NOT_INITIALIZED" | "OPERATION_FAILED" = "NOT_INITIALIZED";
+    let firestoreErrorDetails: string | null = null;
+
     const firestore = getAdminFirestore();
     if (firestore) {
       try {
         const eventDocId = `evt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         await firestore.collection("analytics_events").doc(eventDocId).set(eventRecord);
+        firestoreStatus = "OK";
       } catch (fsErr: any) {
-        // Non-blocking firestore write
-        console.warn("[Analytics Track API] Aviso ao persistir no Firestore:", fsErr?.message || fsErr);
+        firestoreStatus = "OPERATION_FAILED";
+        firestoreErrorDetails = fsErr?.message || String(fsErr);
+        console.error("[Analytics Track API] Firestore operation failed ao persistir no Firestore:", fsErr);
       }
     }
 
     return res.status(200).json({
       success: true,
       logged: eventRecord,
+      firestoreDiagnostics: {
+        status: firestoreStatus,
+        error: firestoreErrorDetails,
+      },
     });
   } catch (err: any) {
     console.error("[Analytics Track API Fatal Error]:", err?.message || err);
